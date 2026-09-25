@@ -27,7 +27,7 @@ h "OS / kernel / namespaces"
 head -2 /etc/os-release; uname -rm
 for k in kernel.unprivileged_userns_clone kernel.apparmor_restrict_unprivileged_userns \
          kernel.apparmor_restrict_unprivileged_unconfined user.max_user_namespaces; do
-  printf '%s = %s\n' "$k" "$(sysctl -n "$k" 2>/dev/null || echo n/a)"
+  printf '%s = %s\n' "$k" "$(cat "/proc/sys/${k//.//}" 2>/dev/null || echo n/a)"
 done
 printf 'apparmor enabled: %s\n' "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null || echo n/a)"
 printf 'cgroup fs: %s\n' "$(stat -fc %T /sys/fs/cgroup 2>/dev/null || echo n/a)"
