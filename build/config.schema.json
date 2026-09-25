@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "claude-build/config.schema.json",
+  "title": "Claude Code + OpenCode build pipeline config",
+  "description": "Every later phase reads this file through the loader in lib/config.sh. Unknown keys are rejected so a typo can never fall back silently to a default.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "repo_allowlist",
+    "sandbox",
+    "network",
+    "worker",
+    "limits",
+    "security_sensitive_paths",
+    "triage",
+    "notifications",
+    "toolchains",
+    "circuit_breaker"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Config format version. The loader migrates older versions in memory and refuses newer ones.",
+      "const": 1
+    },
+    "repo_allowlist": {
+      "description": "D1: repos whose content may be sent to the worker model. Every other repo is refused before handoff.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match", "repos"],
+      "properties": {
+        "match": {
+          "description": "all_remotes: every fetch and push URL of every remote, and every submodule URL, must be listed.",
+          "const": "all_remotes"
+        },
+        "repos": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/allowlist_entry" }
+        }
+      }
+    },
+    "sandbox": {
+      "description": "D2: how the worker is confined. There is no fallback: without the sandbox the task stops.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "fallback"],
+      "properties": {
+        "kind": { "const": "bubblewrap" },
+        "fallback": { "const": "none" }
+      }
+    },
+    "network": {
+      "description": "D3: worker keeps network access behind policy rails; gates and tests always run with networking off.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worker", "gates_and_tests"],
+      "properties": {
+        "worker": { "enum": ["allowed_with_rails", "disabled"] },
+        "gates_and_tests": { "const": "disabled" }
+      }
+    },
+    "worker": {
+      "description": "Worker agent. OC_MODEL in the environment overrides model after the same validation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model"],
+      "properties": {
+        "provider": { "const": "opencode" },
+        "model": { "$ref": "#/$defs/model_id" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["round_cap", "worker_timeout_minutes"],
+      "properties": {
+        "round_cap": {
+          "description": "D4: automatic worker rounds per task (gate retries and review fix rounds combined).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "worker_timeout_minutes": {
+          "description": "D5: wall-clock limit for one worker round.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 480
+        }
+      }
+    },
+    "security_sensitive_paths": {
+      "description": "D6: case-insensitive regexes matched against repo-relative paths. A match forces Opus review. Over-matching is the safe direction.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200,
+        "x-regex": true
+      }
+    },
+    "triage": {
+      "description": "D7: size thresholds.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["small"],
+      "properties": {
+        "small": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_files", "max_changed_lines", "allow_sensitive_paths"],
+          "properties": {
+            "max_files": { "type": "integer", "minimum": 0, "maximum": 50 },
+            "max_changed_lines": { "type": "integer", "minimum": 0, "maximum": 1000 },
+            "allow_sensitive_paths": { "const": false }
+          }
+        }
+      }
+    },
+    "notifications": {
+      "description": "D8: push notifications. Topics and tokens never live in this file; ntfy reads them from a 0600 credentials file.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider"],
+          "properties": { "provider": { "const": "none" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "server", "credentials_file"],
+          "properties": {
+            "provider": { "const": "ntfy" },
+            "server": { "type": "string", "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$" },
+            "credentials_file": { "$ref": "#/$defs/path" }
+          }
+        }
+      ]
+    },
+    "toolchains": {
+      "description": "D9: approved toolchains, exposed read-only inside the sandbox. Claude proposes, the user approves, entries stay.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/toolchain" }
+    },
+    "circuit_breaker": {
+      "description": "D10: last-resort stops enforced where every state transition is written, independent of any phase's own limits.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_transitions_per_task", "max_automated_hours", "max_same_state_resumes"],
+      "properties": {
+        "max_transitions_per_task": {
+          "description": "Total state transitions a task (or slice) may make before it is forced to AWAIT_USER.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 200
+        },
+        "max_automated_hours": {
+          "description": "Wall-clock hours a task may spend in automatic states, excluding time waiting on the user.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 48
+        },
+        "max_same_state_resumes": {
+          "description": "Times a task may be resumed into the same state with no progress before it is forced to AWAIT_USER.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        }
+      }
+    }
+  },
+  "$defs": {
+    "allowlist_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["remote", "added"],
+      "properties": {
+        "remote": {
+          "description": "Normalized remote: lowercase host, no scheme, user, port or .git suffix. Use `build-config normalize-remote <url>`.",
+          "type": "string",
+          "maxLength": 300,
+          "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(/[A-Za-z0-9._~-]+)+$"
+        },
+        "added": { "$ref": "#/$defs/date" },
+        "note": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "components", "paths", "approved"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Za-z0-9._+-]{1,64}$" },
+              "version": { "type": "string", "pattern": "^[A-Za-z0-9._+-]{1,64}$" }
+            }
+          }
+        },
+        "paths": {
+          "description": "Exact directories to bind read-only. Home paths must be versioned subdirectories, never a tool root such as ~/.cargo.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/path" }
+        },
+        "approved": { "$ref": "#/$defs/date" }
+      }
+    },
+    "path": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 400,
+      "pattern": "^(~/|/)[A-Za-z0-9._+@/-]+$"
+    },
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "model_id": {
+      "type": "string",
+      "maxLength": 100,
+      "pattern": "^[a-z0-9][a-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "repo_allowlist": {
+    "match": "all_remotes",
+    "repos": []
+  },
+  "sandbox": {
+    "kind": "bubblewrap",
+    "fallback": "none"
+  },
+  "network": {
+    "worker": "allowed_with_rails",
+    "gates_and_tests": "disabled"
+  },
+  "worker": {
+    "provider": "opencode",
+    "model": "deepseek/deepseek-v4-pro"
+  },
+  "limits": {
+    "round_cap": 3,
+    "worker_timeout_minutes": 60
+  },
+  "security_sensitive_paths": [
+    "auth",
+    "crypto",
+    "session",
+    "token",
+    "permission",
+    "pars(e|er|ing)",
+    "sql",
+    "shell|subprocess|exec"
+  ],
+  "triage": {
+    "small": {
+      "max_files": 1,
+      "max_changed_lines": 30,
+      "allow_sensitive_paths": false
+    }
+  },
+  "notifications": {
+    "provider": "none"
+  },
+  "toolchains": [],
+  "circuit_breaker": {
+    "max_transitions_per_task": 40,
+    "max_automated_hours": 6,
+    "max_same_state_resumes": 3
+  }
+}

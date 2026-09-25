@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# build-config: the only supported way for scripts, skills and the user to read
+# the build pipeline config. See build/lib/config.sh for exit codes.
+set -uo pipefail
+
+BUILD_PIPELINE_VERSION="0.1.0"
+
+usage() {
+  cat <<'EOF'
+Usage: build-config <command> [args]
+
+  validate                 Check ~/.claude/build/config.json; exit 0 only if it is safe and valid
+  show                     Print the effective config (after migration and OC_MODEL override)
+  get <key.path>           Print one value, e.g. limits.round_cap
+  check-repo [dir]         Exit 0 only if every remote and submodule URL of the repo is allowlisted
+  normalize-remote <url>   Print a remote URL in the form repo_allowlist expects
+  version                  Print pipeline and config schema versions
+
+Exit codes: 10 missing, 11 unsafe file, 12 bad JSON, 13 unsupported version,
+14 schema, 15 semantic rule, 16 internal, 20 repo refused, 2 usage.
+EOF
+}
+
+lib="${HOME:?HOME is not set}/.claude/build/lib/config.sh"
+# Check the library before sourcing it: same rules the loader applies to its own files.
+if [ -L "$lib" ] || [ ! -f "$lib" ]; then
+  echo "build-config: loader missing or a symlink: $lib (re-run install.sh)" >&2; exit 16
+fi
+read -r owner mode < <(stat -c '%u %a' -- "$lib")
+if { [ "$owner" != "$(id -u)" ] && [ "$owner" != 0 ]; } || (( 8#$mode & 8#022 )); then
+  echo "build-config: unsafe loader permissions: $lib" >&2; exit 11
+fi
+# shellcheck source=../build/lib/config.sh
+. "$lib"
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+case $cmd in
+  validate)
+    bcfg_load || exit
+    printf 'config OK: %s (schema_version %s)\n' "$(bcfg_dir)/config.json" "$(bcfg_get schema_version)"
+    ;;
+  show)
+    bcfg_load || exit
+    jq . <<<"$BCFG_JSON"
+    ;;
+  get)
+    [ $# -eq 1 ] || { usage >&2; exit 2; }
+    bcfg_load || exit
+    bcfg_get "$1"
+    ;;
+  check-repo)
+    [ $# -le 1 ] || { usage >&2; exit 2; }
+    bcfg_load || exit
+    bcfg_check_repo "${1:-.}"
+    ;;
+  normalize-remote)
+    [ $# -eq 1 ] || { usage >&2; exit 2; }
+    bcfg_normalize_remote "$1" || exit 2
+    ;;
+  version)
+    printf 'build pipeline %s, config schema_version %s\n' "$BUILD_PIPELINE_VERSION" "$BCFG_SUPPORTED_VERSION"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2; exit 2
+    ;;
+esac
